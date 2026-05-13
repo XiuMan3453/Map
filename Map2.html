@@ -17,7 +17,7 @@
             border-radius:5px; z-index:999;
         }
     </style>
-    <script src="https://webapi.amap.com/maps?v=2.0&key=4c6490af0458c510d3341160a8416e16"></script>
+    <script src="https://webapi.amap.com/maps?v=1.4.15"></script>
 </head>
 <body>
     <div id="container"></div>
@@ -225,7 +225,7 @@
 
                 // 切回查看模式
                 isEditMode = false;
-                renderContent();16:59 2026/5/13
+                renderContent();
             };
 
         } else {
@@ -259,7 +259,6 @@
                     marker.setMap(null);
                     markers = markers.filter(m => m !== marker);
                     modal.remove();
-                    alert("地标已删除！");
                 }
             };
         }
