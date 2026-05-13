@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>柳浪湾美食地图</title>
+    <style>
+        html, body, #container {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+        }
+        #controlPanel {
+            position: fixed;
+            top:10px; left:10px;
+            background:white; padding:8px;
+            border-radius:5px; z-index:999;
+        }
+    </style>
+    <script src="https://webapi.amap.com/maps?v=2.0&key=4c6490af0458c510d3341160a8416e16"></script>
+</head>
+<body>
+    <div id="container"></div>
+     <div id="controlPanel">
+        <button id="calcBtn" style="padding:6px 12px; cursor:pointer;">计算地标间距离</button>
+        <button id="cancelBtn" style="padding:6px 12px; cursor:pointer; display:none;">取消</button>
+    </div>
+
+    <script>
+        // ======================
+        // 1. 初始化地图
+        // ======================
+        var map = new AMap.Map('container', {
+            zoom: 16,
+            center: [103.82880927011847, 30.68493393066092]
+        });
+	var markers = [];
+        var line = null;
+        var selectedMarkers = []; // 存放选中的两个地标
+        var isCalcMode = false;   // 是否处于距离计算模式
+
+        document.getElementById("calcBtn").onclick = function() {
+           	 isCalcMode = true;
+            	selectedMarkers = [];
+            	this.style.display = "none";
+            	document.getElementById("cancelBtn").style.display = "inline-block";
+            	alert("已进入距离计算模式，请点击选择两个地标");	
+        };
+
+        document.getElementById("cancelBtn").onclick = function() {
+            exitCalcMode();
+        };
+
+        function exitCalcMode() {
+            isCalcMode = false;
+            selectedMarkers = [];
+            document.getElementById("calcBtn").style.display = "inline-block";
+            document.getElementById("cancelBtn").style.display = "none";
+            if (line) {
+                line.setMap(null);
+                line = null;
+            }
+            markers.forEach(m => {
+                m.setIcon("https://webapi.amap.com/theme/v1.3/markers/n/mark_b.png");
+            });
+        }
+
+
+        // ======================
+        // 2. 点击地图 → 添加地标
+        // ======================
+        map.on('click', function(e) {
+	     if (isCalcMode) return;	
+            var lng = e.lnglat.getLng();
+            var lat = e.lnglat.getLat();
+            var name = prompt("输入地标名称：");
+            if (!name) return;
+
+            var category = prompt("输入类别：");
+            if (!category) category = "未分类";
+
+            var desc = prompt("输入描述：");
+            if (!desc) desc = "无描述";
+
+            // 发送到后端 Redis
+            //addToRedis(name, lng, lat);
+
+            // 添加到地图
+            addMarker(name, category, desc, lng, lat);
+        });
+
+
+        // ======================
+        // 3. 添加标记到地图
+        // ======================
+        function addMarker(name, category, desc, lng, lat) {
+            var marker = new AMap.Marker({
+                position: [lng, lat],
+                icon: "https://webapi.amap.com/theme/v1.3/markers/n/mark_b.png"
+            });
+            marker.setMap(map);
+
+            // 把自定义数据存到 marker 里
+            marker.extData = { name, category, desc, lng, lat };
+
+            markers.push(marker);
+
+            // 点击查看信息
+            marker.on('click', function() {
+                if (isCalcMode) {
+                    selectMarkerForCalc(marker);
+                } else {
+                    showCustomInfo(marker);
+                }
+            });
+        }
+
+	 // ======================
+        // 5. 距离计算核心逻辑
+        // ======================
+        function selectMarkerForCalc(marker) {
+            // 标记高亮（改变图标）
+            marker.setIcon("https://webapi.amap.com/theme/v1.3/markers/n/mark_r.png");
+            selectedMarkers.push(marker);
+
+            if (selectedMarkers.length === 2) {
+                var m1 = selectedMarkers[0];
+                var m2 = selectedMarkers[1];
+
+                // 1. 计算距离
+                var p1 = new AMap.LngLat(m1.extData.lng, m1.extData.lat);
+                var p2 = new AMap.LngLat(m2.extData.lng, m2.extData.lat);
+                 var distance = Math.sqrt(
+                    Math.pow(p2.lng - p1.lng, 2) +
+                    Math.pow(p2.lat - p1.lat, 2)
+                ) * 111000; // 经纬度转米（近似值）
+
+                // 2. 显示结果
+                var distanceKm = (distance / 1000).toFixed(2);
+                alert(`${m1.extData.name} 和 ${m2.extData.name} 的直线距离：\n${distance.toFixed(0)} 米\n（${distanceKm} 公里）`);
+
+                // 3. 在地图上画连线
+                if (line) line.setMap(null);
+                line = new AMap.Polyline({
+                    path: [p1, p2],
+                    strokeColor: "#FF0000",
+                    strokeWeight: 3,
+                    strokeOpacity: 0.8
+                });
+                line.setMap(map);
+
+                // 退出计算模式
+                exitCalcMode();
+            }
+        }
+	function showCustomInfo(marker) {
+    var data = marker.extData;
+    var isEditMode = false; // 控制查看/编辑模式
+
+    // 创建弹窗容器
+    var modal = document.createElement("div");
+    modal.style.cssText = `
+        position: fixed; z-index:999999;
+        left:0; top:0; width:100%; height:100%;
+        background:rgba(0,0,0,0.5);
+        display:flex; align-items:center; justify-content:center;
+    `;
+
+    // 渲染弹窗内容的函数（查看模式/编辑模式共用）
+    function renderContent() {
+        if (isEditMode) {
+            // 编辑模式：输入框可修改
+            modal.innerHTML = `
+                <div style="background:#fff; border-radius:10px; width:320px; padding:16px;">
+                    <h3 style="margin:0 0 12px 0; text-align:center;">编辑地标信息</h3>
+                    
+                    <div style="margin-bottom:8px;">
+                        <label style="display:block; margin-bottom:4px;"><b>名称：</b></label>
+                        <input id="editName" value="${data.name}" style="width:100%; padding:6px; border:1px solid #ccc; border-radius:4px;">
+                    </div>
+                    
+                    <div style="margin-bottom:8px;">
+                        <label style="display:block; margin-bottom:4px;"><b>类别：</b></label>
+                        <input id="editCategory" value="${data.category}" style="width:100%; padding:6px; border:1px solid #ccc; border-radius:4px;">
+                    </div>
+                    
+                    <div style="margin-bottom:8px;">
+                        <label style="display:block; margin-bottom:4px;"><b>描述：</b></label>
+                        <textarea id="editDesc" style="width:100%; padding:6px; border:1px solid #ccc; border-radius:4px; min-height:60px;">${data.desc}</textarea>
+                    </div>
+                    
+                    <p><b>坐标：</b>${data.lng.toFixed(6)}, ${data.lat.toFixed(6)}</p>
+
+                    <div style="display:flex; gap:8px; margin-top:16px;">
+                        <button id="cancelEdit" style="flex:1; padding:7px; border:none; border-radius:6px; background:#eee;">取消</button>
+                        <button id="saveEdit" style="flex:1; padding:7px; border:none; border-radius:6px; background:#2196F3; color:white;">保存修改</button>
+                    </div>
+                </div>
+            `;
+
+            // 编辑模式按钮事件
+            modal.querySelector("#cancelEdit").onclick = () => {
+                isEditMode = false;
+                renderContent(); // 切回查看模式
+            };
+
+            modal.querySelector("#saveEdit").onclick = () => {
+                // 获取新输入的值
+                var newName = modal.querySelector("#editName").value.trim();
+                var newCategory = modal.querySelector("#editCategory").value.trim();
+                var newDesc = modal.querySelector("#editDesc").value.trim();
+
+                if (!newName) {
+                    alert("名称不能为空！");
+                    return;
+                }
+
+                // 更新数据
+                data.name = newName;
+                data.category = newCategory || "未分类";
+                data.desc = newDesc || "无描述";
+
+                // 更新标记标题（鼠标悬停时会显示）
+                marker.setTitle(newName);
+
+                // 切回查看模式
+                isEditMode = false;
+                renderContent();16:59 2026/5/13
+            };
+
+        } else {
+            // 查看模式：显示文本 + 编辑/删除按钮
+            modal.innerHTML = `
+                <div style="background:#fff; border-radius:10px; width:320px; padding:16px;">
+                    <h3 style="margin:0 0 12px 0; text-align:center;">地标信息</h3>
+                    <p><b>名称：</b>${data.name}</p>
+                    <p><b>类别：</b>${data.category}</p>
+                    <p><b>描述：</b>${data.desc}</p>
+                    <p><b>坐标：</b>${data.lng.toFixed(6)}, ${data.lat.toFixed(6)}</p>
+
+                    <div style="display:flex; gap:8px; margin-top:16px;">
+                        <button id="closeBtn" style="flex:1; padding:7px; border:none; border-radius:6px; background:#eee;">关闭</button>
+                        <button id="editBtn" style="flex:1; padding:7px; border:none; border-radius:6px; background:#2196F3; color:white;">编辑</button>
+                        <button id="delBtn" style="flex:1; padding:7px; border:none; border-radius:6px; background:#f44336; color:white;">删除</button>
+                    </div>
+                </div>
+            `;
+
+            // 查看模式按钮事件
+            modal.querySelector("#closeBtn").onclick = () => modal.remove();
+
+            modal.querySelector("#editBtn").onclick = () => {
+                isEditMode = true;
+                renderContent(); // 切换到编辑模式
+            };
+
+            modal.querySelector("#delBtn").onclick = () => {
+                if (confirm("确定要删除这个地标吗？")) {
+                    marker.setMap(null);
+                    markers = markers.filter(m => m !== marker);
+                    modal.remove();
+                    alert("地标已删除！");
+                }
+            };
+        }
+    }
+
+    // 初始渲染查看模式
+    renderContent();
+    document.body.appendChild(modal);
+}
+	
+	
+
+
+        // ======================
+        // 4. 发送数据到 Redis 后端
+        // ======================
+/*
+        function addToRedis(name, lng, lat) {
+            fetch("http://localhost:5000/api/add", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ name, lng, lat })
+            });
+        }
+*/
+      </script>
+</body>
+</html>
